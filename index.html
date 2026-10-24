@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Meteo Passo della Colla</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
+<style>
+/* Layout sullo stile di meteo-pedemontanaforlivese.it: barra in alto, titolone col giudizio moto,
+   webcam grande del passo accanto alla card "ora al passo", poi giudizio dettagliato, webcam degli altri passi, ore e giorni. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0c0f;
+  --card: #15171c; --card-2: #1b1e24;
+  --line: rgba(255,255,255,.08); --line-2: rgba(255,255,255,.16);
+  --ink: #f4f5f7; --ink-soft: #a3a8b2; --ink-faint: #6b717c;
+  --brand: #c31087; --brand-hi: #e0359f;
+  --live: #4ade80; --red: #ef4444; --video: #2563eb; --rain: #7cc4ff;
+  --go: #2fbf71; --warn: #f2b233; --stop: #e5484d;
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--brand-hi); outline-offset: 3px; border-radius: 6px; }
+.container { max-width: 1100px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* ---------- Barra in alto ---------- */
+.nav { position: sticky; top: 0; z-index: 20; background: rgba(11,12,15,.84); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+.nav .container { display: flex; align-items: center; gap: 22px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; flex: none; }
+.brand svg { width: 34px; height: 34px; }
+.brand b { display: block; font-size: .92rem; font-weight: 700; line-height: 1.15; }
+.brand small { display: block; font-size: .7rem; color: var(--ink-soft); }
+.menu { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.menu a { position: relative; text-decoration: none; font-size: .85rem; color: var(--ink-soft); padding: 7px 11px; border-radius: 8px; white-space: nowrap; }
+.menu a:hover { color: var(--ink); background: rgba(255,255,255,.05); }
+@media (max-width: 720px) { .brand small { display: none; } }
+@media (max-width: 480px) { .brand span { display: none; } .nav .container { gap: 12px; } }
+
+/* ---------- Titolone ---------- */
+.hero { padding-top: 40px; padding-bottom: 28px; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 7px; font-size: .68rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); padding: 5px 10px; border: 1px solid var(--line-2); border-radius: 999px; background: rgba(255,255,255,.03); }
+.pill.live { color: var(--live); border-color: rgba(74,222,128,.35); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; animation: blink 2.4s infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+h1 { margin: 18px 0 0; font-size: clamp(2.3rem, 6.4vw, 3.6rem); line-height: 1.04; font-weight: 800; letter-spacing: -.035em; text-wrap: balance; }
+.hl { color: var(--lvl, var(--ink-soft)); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--lvl, var(--ink-soft)) 60%, transparent); text-decoration-thickness: .1em; text-underline-offset: .14em; }
+.lead { margin: 16px 0 0; max-width: 44rem; font-size: 1.05rem; color: var(--ink-soft); text-wrap: balance; }
+.lead b { color: var(--ink); font-weight: 600; }
+
+/* ---------- Webcam ---------- */
+.cam { position: relative; display: block; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--card-2); aspect-ratio: 16 / 10; cursor: pointer; }
+.cam img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .6s; }
+.cam:hover img { transform: scale(1.03); }
+.cam::after { content: ""; position: absolute; inset: 40% 0 0; background: linear-gradient(transparent, rgba(0,0,0,.8)); pointer-events: none; }
+.cam .err { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; color: var(--ink-faint); font-size: .82rem; }
+.badge { position: absolute; top: 10px; z-index: 1; display: inline-flex; align-items: center; gap: 5px; font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 4px 7px; border-radius: 6px; }
+.badge.live { left: 10px; background: rgba(0,0,0,.6); color: #fff; }
+.badge.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+.badge.video { right: 10px; background: var(--video); color: #fff; }
+.badge.video:hover { filter: brightness(1.15); }
+.badge.hd { right: 10px; background: rgba(0,0,0,.45); color: var(--ink-soft); }
+.cap { position: absolute; left: 12px; right: 12px; bottom: 10px; z-index: 1; display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; text-shadow: 0 1px 8px rgba(0,0,0,.5); }
+.cap b { display: block; font-size: .92rem; font-weight: 700; }
+.cap small { display: block; font-size: .72rem; color: rgba(255,255,255,.72); }
+.cap em { font-style: normal; font-size: .68rem; color: rgba(255,255,255,.6); white-space: nowrap; }
+.cam.feature { aspect-ratio: auto; min-height: 300px; height: 100%; }
+.cam.feature .badge { top: 14px; font-size: .68rem; padding: 5px 9px; }
+.cam.feature .badge.live { left: 14px; } .cam.feature .badge.video, .cam.feature .badge.hd { right: 14px; }
+.cam.feature .cap { left: 16px; right: 16px; bottom: 14px; }
+.cam.feature .cap b { font-size: 1.15rem; }
+.cam-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 860px) { .cam-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .cam-grid { grid-template-columns: 1fr; } }
+
+/* ---------- Card ---------- */
+.row { display: grid; grid-template-columns: 1.45fr 1fr; gap: 16px; }
+@media (max-width: 860px) { .row { grid-template-columns: 1fr; } .cam.feature { aspect-ratio: 16 / 10; min-height: 0; height: auto; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; min-width: 0; }
+.eyebrow { font-size: .7rem; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--live); }
+.linkbtn { background: none; border: 0; padding: 0; cursor: pointer; color: var(--live); font-size: .78rem; text-decoration: none; }
+.linkbtn:hover { text-decoration: underline; }
+
+.now-top { display: flex; justify-content: space-between; gap: 10px; font-size: .74rem; color: var(--ink-faint); }
+.now-top .on { display: flex; align-items: center; gap: 7px; color: var(--live); font-weight: 600; letter-spacing: .1em; text-transform: uppercase; font-size: .7rem; }
+.now-main { display: flex; align-items: center; gap: 14px; margin: 12px 0 16px; }
+.now-main svg { width: 60px; height: 60px; flex: none; }
+.big { font-size: 3.4rem; font-weight: 800; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+.big sup { font-size: 1.25rem; font-weight: 600; color: var(--ink-soft); letter-spacing: 0; margin-left: 2px; position: relative; top: -.2em; vertical-align: top; }
+.now-main .cond { color: var(--ink-soft); margin-top: 4px; }
+.now-main .hilo { color: var(--ink-faint); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.tile .k { font-size: .68rem; color: var(--ink-faint); font-weight: 500; }
+.tile .v { font-size: 1.05rem; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.tile .s { font-size: .72rem; color: var(--ink-soft); margin-top: 2px; }
+.card-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; font-size: .75rem; color: var(--ink-faint); }
+
+/* ---------- Sezioni ---------- */
+.section { margin-top: 64px; }
+.section h2 { margin: 6px 0 0; font-size: clamp(1.45rem, 3vw, 1.75rem); font-weight: 700; letter-spacing: -.02em; }
+.section .sub { margin: 6px 0 20px; color: var(--ink-soft); max-width: 40rem; }
+
+/* Giudizio moto */
+.verdict { display: grid; grid-template-columns: auto 1fr auto; gap: 16px 18px; align-items: center; }
+.light { width: 48px; height: 48px; border-radius: 50%; background: var(--lvl, var(--ink-faint)); box-shadow: 0 0 0 7px color-mix(in srgb, var(--lvl, #fff) 20%, transparent), 0 0 30px color-mix(in srgb, var(--lvl, #fff) 55%, transparent); }
+.verdict h3 { margin: 0; font-size: 1.45rem; font-weight: 700; letter-spacing: -.015em; text-wrap: balance; }
+.verdict .when { color: var(--ink-soft); font-size: .9rem; margin-top: 3px; }
+.verdict .win { align-self: start; font-size: .72rem; color: var(--ink-faint); border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 8px; white-space: nowrap; }
+.chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-size: .8rem; padding: 5px 10px; border-radius: 8px; background: rgba(255,255,255,.05); border: 1px solid var(--line-2); }
+.chip.bad  { border-color: color-mix(in srgb, var(--stop) 60%, transparent); background: color-mix(in srgb, var(--stop) 14%, transparent); }
+.chip.warn { border-color: color-mix(in srgb, var(--warn) 60%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.chip.good { border-color: color-mix(in srgb, var(--go) 60%, transparent); background: color-mix(in srgb, var(--go) 12%, transparent); }
+@media (max-width: 520px) { .verdict { grid-template-columns: auto 1fr; } .verdict .win { grid-column: 1 / -1; justify-self: start; } }
+
+/* Ora per ora */
+.hours { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+.hour { flex: 0 0 64px; display: grid; justify-items: center; gap: 4px; padding: 10px 2px 8px; border-radius: 10px; font-variant-numeric: tabular-nums; }
+.hour.now { background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px var(--line-2); }
+.hour .h { font-size: .76rem; color: var(--ink-soft); font-weight: 500; }
+.hour svg { width: 30px; height: 30px; }
+.hour .t { font-size: 1.05rem; font-weight: 700; }
+.hour .p { font-size: .72rem; color: var(--rain); min-height: 1em; font-weight: 500; }
+.hour .g { font-size: .68rem; color: var(--ink-faint); }
+.hour .dot2 { width: 7px; height: 7px; border-radius: 50%; background: var(--lvl); }
+
+/* Prossimi giorni */
+.days { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 10px; }
+.dcard { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 4px; justify-items: center; text-align: center; min-width: 0; }
+.dcard.today { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+.dcard .dh { justify-self: stretch; display: flex; justify-content: space-between; font-size: .9rem; font-weight: 700; text-transform: capitalize; }
+.dcard .dh small { color: var(--ink-faint); font-weight: 500; }
+.dcard > svg { width: 44px; height: 44px; margin: 6px 0 2px; }
+.dcard .tt { font-variant-numeric: tabular-nums; }
+.dcard .tt b { font-size: 1.3rem; font-weight: 800; }
+.dcard .tt span { font-size: .92rem; font-weight: 600; margin-left: 5px; opacity: .8; }
+.dcard .dc { font-size: .76rem; color: var(--ink-soft); min-height: 2.5em; line-height: 1.25; text-wrap: balance; }
+.dcard .df { justify-self: stretch; display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); font-size: .72rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dcard .df .pp { color: var(--rain); }
+.tag { justify-self: stretch; display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 6px; padding: 6px; border-radius: 8px; font-size: .78rem; font-weight: 700; background: color-mix(in srgb, var(--lvl) 14%, transparent); border: 1px solid color-mix(in srgb, var(--lvl) 45%, transparent); }
+.tag i { width: 8px; height: 8px; border-radius: 50%; background: var(--lvl); }
+.mi { width: 11px; height: 11px; vertical-align: -1px; margin-right: 3px; }
+@media (max-width: 700px) { .days { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 6px; } .dcard { flex: 0 0 150px; scroll-snap-align: start; } }
+
+.foot { margin-top: 64px; padding: 20px 0 40px; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: .75rem; line-height: 1.6; }
+.foot a { color: var(--ink-soft); }
+.loading { color: var(--ink-faint); font-size: .9rem; }
+
+/* ---------- Webcam ingrandita ---------- */
+dialog.lb { width: min(1100px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 0; border: 1px solid var(--line-2); border-radius: 14px; background: var(--card); color: var(--ink); overflow: hidden; }
+dialog.lb::backdrop { background: rgba(0,0,0,.82); backdrop-filter: blur(4px); }
+.lb-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); }
+.lb-head div { min-width: 0; }
+.lb-head b { font-size: 1rem; }
+.lb-head small { display: block; color: var(--ink-faint); font-size: .76rem; }
+.seg { margin-left: auto; display: flex; background: var(--card-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; flex: none; }
+.seg button { background: none; border: 0; padding: 5px 11px; border-radius: 6px; font-size: .78rem; color: var(--ink-soft); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: rgba(255,255,255,.1); color: var(--ink); }
+.x { background: none; border: 0; font-size: 1.5rem; line-height: 1; color: var(--ink-soft); cursor: pointer; padding: 2px 8px; flex: none; }
+.x:hover { color: var(--ink); }
+.lb-body { aspect-ratio: 16 / 9; max-height: calc(100vh - 90px); background: #000; }
+.lb-body img, .lb-body iframe { width: 100%; height: 100%; object-fit: contain; border: 0; display: block; }
+
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .dot { animation: none; } .cam img { transition: none; } }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="container">
+    <a class="brand" href="meteo-passo-colla.html">
+      <svg viewBox="0 0 36 36" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e0359f"/><stop offset="1" stop-color="#5a0a40"/></linearGradient></defs><rect width="36" height="36" rx="10" fill="url(#lg)"/><circle cx="14" cy="14" r="5" fill="#FFD25A"/><path d="M11 27h14a5 5 0 0 0 0-10 6.5 6.5 0 0 0-12.4-1.4A5 5 0 0 0 11 27z" fill="#fff"/></svg>
+      <span><b>Meteo Colla</b><small>moto al Passo della Colla</small></span>
+    </a>
+    <div class="menu">
+      <a href="#moto">Moto</a>
+      <a href="#webcam">Webcam</a>
+      <a href="#previsioni">Previsioni</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero container" aria-live="polite">
+  <div class="pills">
+    <span class="pill live"><i class="dot"></i>In diretta · 913 m</span>
+    <span class="pill">SP 302 Faentina · Casaglia</span>
+  </div>
+  <h1>Passo della Colla,<br><span class="hl" id="hVerdict">guardo il cielo…</span></h1>
+  <p class="lead" id="lead">&nbsp;</p>
+</header>
+
+<main class="container">
+
+  <div class="row">
+    <div class="cam feature" role="button" tabindex="0" data-cam="passocolla" aria-label="Ingrandisci la webcam del Passo della Colla">
+      <img alt="Webcam in diretta del Passo della Colla di Casaglia">
+      <div class="err" hidden>Immagine non disponibile in questo momento</div>
+      <span class="badge live">Live</span>
+      <span class="badge video">▶ Video</span>
+      <div class="cap"><div><b>Passo della Colla</b><small>Crinale · 913 m · <span id="camTime"></span></small></div><em>clicca per ingrandire</em></div>
+    </div>
+
+    <section class="card">
+      <div class="now-top"><span class="on"><i class="dot"></i>Ora · al passo</span><span>913 m s.l.m.</span></div>
+      <div class="now-main">
+        <svg id="iNow" viewBox="0 0 64 64" aria-hidden="true"></svg>
+        <div><div class="big" id="tNow">--<sup>°C</sup></div><div class="cond" id="cNow">Carico i dati…</div><div class="hilo" id="hilo">&nbsp;</div></div>
+      </div>
+      <div class="tiles">
+        <div class="tile"><div class="k">Percepita</div><div class="v" id="dFeels">--</div><div class="s">col vento in faccia è peggio</div></div>
+        <div class="tile"><div class="k">Vento</div><div class="v" id="dWind">--</div><div class="s" id="dGust">raffiche --</div></div>
+        <div class="tile"><div class="k">Umidità</div><div class="v" id="dHum">--</div><div class="s" id="dDew">&nbsp;</div></div>
+        <div class="tile"><div class="k">Visibilità</div><div class="v" id="dVis">--</div><div class="s" id="dVisS">&nbsp;</div></div>
+        <div class="tile"><div class="k">Pioggia ultime 6 h</div><div class="v" id="dRain6">--</div><div class="s" id="dRoad">&nbsp;</div></div>
+        <div class="tile"><div class="k">Tramonto</div><div class="v" id="dSun">--</div><div class="s" id="dSunS">&nbsp;</div></div>
+      </div>
+      <div class="card-foot"><span id="updated">—</span><button class="linkbtn" type="button" id="reload">Aggiorna ›</button></div>
+    </section>
+  </div>
+
+  <section class="section" id="moto">
+    <div class="eyebrow">Giudizio moto</div>
+    <h2 id="vLabel">Moto oggi?</h2>
+    <p class="sub">Pioggia, temporali, neve, ghiaccio sotto i 3 °C, raffiche e nebbia sulla fascia in cui si gira.</p>
+    <div class="card">
+      <div class="verdict" id="verdict" style="--lvl: var(--ink-faint)">
+        <div class="light"></div>
+        <div>
+          <h3 id="vTitle">In attesa delle previsioni</h3>
+          <div class="when" id="vWhen">&nbsp;</div>
+        </div>
+        <span class="win" id="window">Fascia 9–19</span>
+        <div class="chips" id="vChips"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="webcam">
+    <div class="eyebrow">Webcam</div>
+    <h2>Gli altri passi del giro</h2>
+    <p class="sub">Muraglione, Calla e la collina di Modigliana: clicca per ingrandire, ▶ Video per la diretta. <span id="camTime2"></span> · <button class="linkbtn" type="button" id="camReload">Ricarica immagini ›</button></p>
+    <div class="cam-grid" id="cams"></div>
+  </section>
+
+  <section class="section" id="previsioni">
+    <div class="eyebrow">Previsioni</div>
+    <h2>Ora per ora al passo</h2>
+    <p class="sub">Dall'ora attuale per 20 ore: probabilità di pioggia, raffiche e pallino delle condizioni per la moto.</p>
+    <div class="card"><div class="hours" id="hours"><span class="loading">Carico…</span></div></div>
+
+    <h2 style="margin-top: 40px">Prossimi giorni</h2>
+    <p class="sub">Giudizio sulla fascia 9–19 di ogni giorno.</p>
+    <div class="days" id="days"><span class="loading">Carico…</span></div>
+  </section>
+
+  <footer class="foot">
+    Previsioni per il punto 44,03 N · 11,48 E corrette sulla quota del passo (913 m), aggiornate ogni 15 minuti.
+    Il giudizio considera pioggia, temporali, neve, temperatura sotto i 3 °C (ghiaccio), raffiche oltre 40/60 km/h e nebbia.
+    È un aiuto alla decisione: la webcam resta il riscontro più affidabile.<br>
+    Dati meteo: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0) ·
+    Webcam e video: <a href="https://www.meteo-pedemontanaforlivese.it/#webcam" target="_blank" rel="noopener">Meteo Pedemontana Forlivese</a>
+  </footer>
+</main>
+
+<dialog class="lb" id="lb" aria-labelledby="lbTitle">
+  <div class="lb-head">
+    <div><b id="lbTitle"></b><small id="lbSub"></small></div>
+    <div class="seg" role="group" aria-label="Foto o video"><button type="button" id="lbFoto">Foto</button><button type="button" id="lbVideo">Video live</button></div>
+    <button class="x" type="button" id="lbClose" aria-label="Chiudi">×</button>
+  </div>
+  <div class="lb-body" id="lbBody"></div>
+</dialog>
+
+<script>
+const PASS = { lat: 44.0333, lon: 11.4833, elev: 913 };
+const FAENZA = { lat: 44.2856, lon: 11.8834 };
+const RIDE_FROM = 9, RIDE_TO = 19;          // ultima ora inclusa: 18:00–19:00
+const REFRESH_MS = 15 * 60 * 1000;
+
+// webcam di meteo-pedemontanaforlivese.it: immagine da cam.php, diretta video dal player meteoproject (code)
+const CAM_BASE = "https://meteo-pedemontanaforlivese.it/cam.php?cam=";
+const STREAM_BASE = "https://stream-meteoproject.eu/weathercam-player.php?code=";
+const CAMS = [
+  { id: "passocolla", name: "Passo della Colla",    sub: "Crinale · 913 m",  stream: 96 },
+  { id: "muraglione", name: "Passo del Muraglione", sub: "Crinale · 836 m",  stream: 85 },
+  { id: "passocalla", name: "Passo della Calla",    sub: "Crinale · 1296 m", stream: 103 },
+  { id: "sansavino",  name: "San Savino",           sub: "Modigliana · 440 m" }
+];
+
+const $ = id => document.getElementById(id);
+
+/* ---------- Codici WMO ---------- */
+const WMO = {
+  0:"Sereno",1:"Quasi sereno",2:"Parzialmente nuvoloso",3:"Coperto",
+  45:"Nebbia",48:"Nebbia con brina",
+  51:"Pioviggine debole",53:"Pioviggine",55:"Pioviggine intensa",56:"Pioviggine gelata",57:"Pioviggine gelata",
+  61:"Pioggia debole",63:"Pioggia",65:"Pioggia forte",66:"Pioggia gelata",67:"Pioggia gelata forte",
+  71:"Neve debole",73:"Neve",75:"Neve forte",77:"Granuli di neve",
+  80:"Rovesci deboli",81:"Rovesci",82:"Rovesci violenti",85:"Rovesci di neve",86:"Rovesci di neve forti",
+  95:"Temporale",96:"Temporale con grandine",99:"Temporale con grandine forte"
+};
+function kind(code, isDay = 1) {
+  if (code <= 1) return isDay ? "sun" : "moon";
+  if (code === 2) return isDay ? "partly" : "partlyNight";
+  if (code === 3) return "cloud";
+  if (code === 45 || code === 48) return "fog";
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "snow";
+  if (code >= 95) return "storm";
+  return "rain";
+}
+
+/* ---------- Icone ---------- */
+const SUN = '<circle cx="32" cy="32" r="11" fill="#FFD25A"/><g stroke="#FFD25A" stroke-width="3.5" stroke-linecap="round"><path d="M32 8v6M32 50v6M8 32h6M50 32h6M15 15l4.2 4.2M44.8 44.8 49 49M15 49l4.2-4.2M44.8 19.2 49 15"/></g>';
+const MOON = '<path d="M40 12a20 20 0 1 0 12 30A16 16 0 0 1 40 12z" fill="#E8EEFF"/>';
+const CLOUD = (y = 0, fill = "#F2F6FA") => `<path transform="translate(0 ${y})" d="M20 46h26a10 10 0 0 0 0-20 13 13 0 0 0-25-3 9 9 0 0 0-1 23z" fill="${fill}"/>`;
+const ICONS = {
+  sun: SUN,
+  moon: MOON,
+  partly: '<g transform="translate(-8 -8) scale(.8)">' + SUN + '</g>' + CLOUD(4),
+  partlyNight: '<g transform="translate(-6 -8) scale(.75)">' + MOON + '</g>' + CLOUD(4),
+  cloud: CLOUD(0, "#E3E9F0") ,
+  fog: CLOUD(-6, "#DDE3E8") + '<g stroke="#DDE3E8" stroke-width="3.5" stroke-linecap="round"><path d="M14 48h36M20 55h28"/></g>',
+  rain: CLOUD(-6, "#DCE4EC") + '<g stroke="#7CC4FF" stroke-width="3.5" stroke-linecap="round"><path d="M24 46l-3 8M33 46l-3 8M42 46l-3 8"/></g>',
+  snow: CLOUD(-6, "#EEF3F8") + '<g fill="#FFFFFF"><circle cx="23" cy="50" r="2.6"/><circle cx="32" cy="55" r="2.6"/><circle cx="41" cy="50" r="2.6"/></g>',
+  storm: CLOUD(-6, "#C9CFDA") + '<path d="M34 40l-8 12h6l-3 9 10-13h-6l3-8z" fill="#FFD25A"/>'
+};
+const icon = (code, isDay) => ICONS[kind(code, isDay)];
+// mini icone per le card dei giorni: freccia verso dove soffia il vento, goccia
+const windArrow = deg => `<svg class="mi" viewBox="0 0 12 12" style="transform:rotate(${deg + 180}deg)" aria-hidden="true"><path d="M6 11V1M2.5 4.5 6 1l3.5 3.5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const DROP = '<svg class="mi" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2C4.1 3.8 3 5.5 3 7.2a3 3 0 0 0 6 0C9 5.5 7.9 3.8 6 1.2z" fill="currentColor"/></svg>';
+
+/* ---------- Valutazione per la moto ---------- */
+const SNOW = c => (c >= 71 && c <= 77) || c === 85 || c === 86;
+function assessHour(h) {
+  const r = [];
+  if (h.code >= 95) r.push(["Temporali", 2]);
+  if (SNOW(h.code)) r.push(["Neve", 2]);
+  if (h.code === 56 || h.code === 57 || h.code === 66 || h.code === 67) r.push(["Pioggia gelata", 2]);
+  if (h.precip >= 0.5 || h.prob >= 60) r.push(["Pioggia", 2]);
+  else if (h.prob >= 30 || h.precip > 0.1) r.push(["Possibili piogge", 1]);
+  if (h.temp <= 3) r.push(["Rischio ghiaccio", 2]);
+  else if (h.temp < 8) r.push(["Freddo", 1]);
+  if (h.gust >= 60) r.push(["Raffiche forti", 2]);
+  else if (h.gust >= 40) r.push(["Vento a raffiche", 1]);
+  if (h.vis != null) {
+    if (h.vis < 300) r.push(["Nebbia fitta", 2]);
+    else if (h.vis < 1000) r.push(["Nebbia", 1]);
+  }
+  return { level: r.reduce((m, x) => Math.max(m, x[1]), 0), reasons: r };
+}
+
+function assessWindow(hours, wetBefore) {
+  const res = hours.map(h => ({ h, ...assessHour(h) }));
+  const bad = res.filter(x => x.level === 2).length;
+  const warn = res.filter(x => x.level === 1).length;
+
+  // motivi con fascia oraria
+  const byReason = new Map();
+  for (const x of res) for (const [name, lvl] of x.reasons) {
+    const e = byReason.get(name) || { name, lvl, from: x.h.hour, to: x.h.hour };
+    e.to = x.h.hour; e.lvl = Math.max(e.lvl, lvl);
+    byReason.set(name, e);
+  }
+  const reasons = [...byReason.values()].sort((a, b) => b.lvl - a.lvl);
+  if (wetBefore >= 1) reasons.push({ name: "Strada probabilmente bagnata", lvl: 1, note: `${fmt1(wetBefore)} mm nelle ore precedenti` });
+
+  // finestra migliore: serie più lunga di ore senza problemi
+  let best = null, cur = null;
+  for (const x of res) {
+    if (x.level === 0) { cur = cur ? { ...cur, to: x.h.hour } : { from: x.h.hour, to: x.h.hour }; }
+    else cur = null;
+    if (cur && (!best || cur.to - cur.from > best.to - best.from)) best = { ...cur };
+  }
+
+  let level;
+  if (bad >= 2) level = 2;
+  else if (bad === 1 || warn >= 3 || (wetBefore >= 1 && warn >= 1)) level = 1;
+  else level = 0;
+  return { level, reasons, best, total: res.length };
+}
+
+const LEVEL = [
+  { css: "var(--go)",   title: "Via libera, si va in moto", short: "Si va",    head: "si va in moto." },
+  { css: "var(--warn)", title: "Si può, ma con prudenza",   short: "Prudenza", head: "sì, ma con prudenza." },
+  { css: "var(--stop)", title: "Meglio restare a casa",     short: "Casa",     head: "meglio restare a casa." }
+];
+
+/* ---------- Utilità ---------- */
+const fmt1 = n => n.toLocaleString("it-IT", { maximumFractionDigits: 1 });
+const rnd = n => Math.round(n);
+const hh = h => String(h).padStart(2, "0");
+const range = (a, b) => a === b ? `${hh(a)}:00` : `${hh(a)}–${hh(b + 1)}`;
+function cardinal(deg) { return ["N","NE","E","SE","S","SO","O","NO"][Math.round(deg / 45) % 8]; }
+const TEMP_STOPS = [[-5,"#8aa8ff"],[5,"#6cc3ff"],[12,"#7fe0b0"],[18,"#f2d36b"],[25,"#f59a4a"],[33,"#e5484d"]];
+function tempColor(t) {
+  const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  if (t <= TEMP_STOPS[0][0]) return TEMP_STOPS[0][1];
+  for (let i = 1; i < TEMP_STOPS.length; i++) if (t <= TEMP_STOPS[i][0]) {
+    const [t0, c0] = TEMP_STOPS[i - 1], [t1, c1] = TEMP_STOPS[i], k = (t - t0) / (t1 - t0);
+    const a = hex(c0), b = hex(c1);
+    return `rgb(${a.map((v, j) => Math.round(v + (b[j] - v) * k)).join(",")})`;
+  }
+  return TEMP_STOPS.at(-1)[1];
+}
+
+/* ---------- Dati ---------- */
+async function getJSON(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+function passURL() {
+  const p = new URLSearchParams({
+    latitude: PASS.lat, longitude: PASS.lon, elevation: PASS.elev, timezone: "Europe/Rome", forecast_days: 4,
+    current: "temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,visibility",
+    hourly: "temperature_2m,precipitation_probability,precipitation,weather_code,wind_gusts_10m,visibility,is_day",
+    daily: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset",
+    past_days: 1
+  });
+  return "https://api.open-meteo.com/v1/forecast?" + p;
+}
+function faenzaURL() {
+  const p = new URLSearchParams({ latitude: FAENZA.lat, longitude: FAENZA.lon, timezone: "Europe/Rome", current: "temperature_2m,weather_code" });
+  return "https://api.open-meteo.com/v1/forecast?" + p;
+}
+
+function hourlyRows(d) {
+  const H = d.hourly;
+  return H.time.map((t, i) => ({
+    time: t, date: t.slice(0, 10), hour: +t.slice(11, 13),
+    temp: H.temperature_2m[i], prob: H.precipitation_probability[i] ?? 0, precip: H.precipitation[i] ?? 0,
+    code: H.weather_code[i], gust: H.wind_gusts_10m[i] ?? 0, vis: H.visibility ? H.visibility[i] : null, isDay: H.is_day[i]
+  }));
+}
+
+/* ---------- Render ---------- */
+function render(d, fz) {
+  const c = d.current;
+  const rows = hourlyRows(d);
+  const nowKey = c.time.slice(0, 13);              // "YYYY-MM-DDTHH"
+  const nowIdx = Math.max(0, rows.findIndex(r => r.time.startsWith(nowKey)));
+  const today = c.time.slice(0, 10);
+  const nowHour = +c.time.slice(11, 13);
+  const dIdx = d.daily.time.indexOf(today);
+
+  $("tNow").innerHTML = `${rnd(c.temperature_2m)}<sup>°C</sup>`;
+  $("cNow").textContent = WMO[c.weather_code] ?? "—";
+  $("iNow").innerHTML = icon(c.weather_code, c.is_day);
+  $("hilo").textContent = `max ${rnd(d.daily.temperature_2m_max[dIdx])}° · min ${rnd(d.daily.temperature_2m_min[dIdx])}°`;
+  $("updated").textContent = "Aggiornato alle " + new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+
+  // dettagli
+  $("dFeels").textContent = rnd(c.apparent_temperature) + "°";
+  $("dWind").textContent = `${rnd(c.wind_speed_10m)} km/h ${cardinal(c.wind_direction_10m)}`;
+  $("dGust").textContent = `raffiche ${rnd(c.wind_gusts_10m)} km/h`;
+  $("dHum").textContent = rnd(c.relative_humidity_2m) + "%";
+  $("dDew").textContent = `punto di rugiada ${rnd(c.dew_point_2m)}°`;
+  const vis = c.visibility ?? rows[nowIdx].vis;
+  if (vis != null) {
+    $("dVis").textContent = vis >= 10000 ? ">10 km" : vis >= 1000 ? fmt1(vis / 1000) + " km" : rnd(vis) + " m";
+    $("dVisS").textContent = vis < 300 ? "nebbia fitta" : vis < 1000 ? "nebbia" : vis < 5000 ? "foschia" : "buona";
+  } else { $("dVis").textContent = "n.d."; }
+  const rain6 = rows.slice(Math.max(0, nowIdx - 6), nowIdx).reduce((s, r) => s + r.precip, 0);
+  $("dRain6").textContent = fmt1(rain6) + " mm";
+  $("dRoad").textContent = rain6 >= 1 ? "asfalto probabilmente bagnato" : rain6 > 0 ? "possibile umido in ombra" : "asfalto asciutto";
+  const sunset = d.daily.sunset[dIdx].slice(11, 16);
+  $("dSun").textContent = sunset;
+  $("dSunS").textContent = "alba " + d.daily.sunrise[dIdx].slice(11, 16);
+
+  // giudizio: oggi se resta tempo nella fascia, altrimenti domani
+  let targetDate = today, from = Math.max(RIDE_FROM, nowHour), label = "Oggi";
+  if (nowHour >= RIDE_TO) { targetDate = d.daily.time[dIdx + 1]; from = RIDE_FROM; label = "Domani"; }
+  const winRows = rows.filter(r => r.date === targetDate && r.hour >= from && r.hour < RIDE_TO);
+  const firstIdx = rows.indexOf(winRows[0]);
+  const wet = rows.slice(Math.max(0, firstIdx - 6), firstIdx).reduce((s, r) => s + r.precip, 0);
+  const a = assessWindow(winRows, wet);
+  const L = LEVEL[a.level];
+  $("verdict").style.setProperty("--lvl", L.css);
+  $("hVerdict").style.setProperty("--lvl", L.css);
+  $("hVerdict").textContent = (label === "Oggi" ? "" : "domani ") + L.head;
+  $("vLabel").textContent = label === "Oggi" ? "Moto oggi?" : "Moto domani?";
+  $("window").textContent = `${label} ${hh(from)}–${hh(RIDE_TO)}`;
+  $("vTitle").textContent = L.title;
+  $("vWhen").textContent = a.best
+    ? (a.level === 0 ? `Condizioni buone su tutta la fascia ${range(a.best.from, a.best.to)}` : `Finestra migliore: ${range(a.best.from, a.best.to)}`)
+    : "Nessuna finestra pulita nella fascia";
+  const chips = a.reasons.length
+    ? a.reasons.map(r => `<span class="chip ${r.lvl === 2 ? "bad" : "warn"}">${r.name}${r.note ? " · " + r.note : r.from != null ? " · " + range(r.from, r.to) : ""}</span>`)
+    : [`<span class="chip good">Asciutto, niente vento forte, temperature ok</span>`];
+  $("vChips").innerHTML = chips.join("");
+
+  const fzTxt = fz ? ` · a Faenza <b>${rnd(fz.current.temperature_2m)}°</b> (${(WMO[fz.current.weather_code] ?? "").toLowerCase()}), qui ${rnd(fz.current.temperature_2m - c.temperature_2m)}° in meno` : "";
+  $("lead").innerHTML = `Adesso <b>${rnd(c.temperature_2m)}°</b> e ${(WMO[c.weather_code] ?? "").toLowerCase()}, raffiche a <b>${rnd(c.wind_gusts_10m)} km/h</b>${fzTxt}. ${a.best && a.level > 0 ? `Finestra migliore <b>${range(a.best.from, a.best.to)}</b>.` : ""}`;
+
+  // ora per ora: dall'ora attuale per 20 ore
+  $("hours").innerHTML = rows.slice(nowIdx, nowIdx + 20).map((r, i) => {
+    const lv = assessHour(r).level;
+    return `<div class="hour${i === 0 ? " now" : ""}" style="--lvl:${LEVEL[lv].css}" title="${WMO[r.code] ?? ""}">
+      <div class="h">${i === 0 ? "Ora" : hh(r.hour)}</div>
+      <svg viewBox="0 0 64 64" aria-hidden="true">${icon(r.code, r.isDay)}</svg>
+      <div class="t">${rnd(r.temp)}°</div>
+      <div class="p">${r.prob >= 10 ? r.prob + "%" : ""}</div>
+      <div class="g">${rnd(r.gust)} km/h</div>
+      <div class="dot2"></div>
+    </div>`;
+  }).join("");
+
+  // prossimi giorni
+  const D = d.daily;
+  $("days").innerHTML = D.time.map((t, i) => {
+    if (t < today) return "";
+    const dayRows = rows.filter(r => r.date === t && r.hour >= RIDE_FROM && r.hour < RIDE_TO);
+    const fi = rows.indexOf(dayRows[0]);
+    const w = rows.slice(Math.max(0, fi - 6), fi).reduce((s, r) => s + r.precip, 0);
+    const lv = assessWindow(dayRows, w).level;
+    const date = new Date(t + "T12:00");
+    const name = t === today ? "Oggi" : date.toLocaleDateString("it-IT", { weekday: "long" });
+    const mx = D.temperature_2m_max[i], mn = D.temperature_2m_min[i];
+    return `<div class="dcard${t === today ? " today" : ""}">
+      <div class="dh"><span>${name}</span><small>${date.getDate()}</small></div>
+      <svg viewBox="0 0 64 64" aria-hidden="true">${icon(D.weather_code[i], 1)}</svg>
+      <div class="tt"><b style="color:${tempColor(mx)}">${rnd(mx)}°</b><span style="color:${tempColor(mn)}">${rnd(mn)}°</span></div>
+      <div class="dc">${(WMO[D.weather_code[i]] ?? "").toLowerCase()}</div>
+      <div class="df"><span>${windArrow(D.wind_direction_10m_dominant[i])}raffiche ${rnd(D.wind_gusts_10m_max[i])}</span><span class="pp">${DROP}${D.precipitation_probability_max[i] ?? 0}%</span></div>
+      <div class="tag" style="--lvl:${LEVEL[lv].css}"><i></i>${LEVEL[lv].short}</div>
+    </div>`;
+  }).join("");
+}
+
+async function load() {
+  $("updated").textContent = "Aggiorno…";
+  try {
+    const [d, fz] = await Promise.all([getJSON(passURL()), getJSON(faenzaURL()).catch(() => null)]);
+    render(d, fz);
+  } catch (e) {
+    $("hVerdict").textContent = "previsioni non raggiungibili.";
+    $("updated").textContent = "Previsioni non raggiungibili (" + e.message + "). Controlla la connessione e premi Aggiorna.";
+  }
+  reloadCams();
+}
+
+/* ---------- Webcam: card, ricarica, ingrandimento con foto o video ---------- */
+function camCard(c) {
+  return `<div class="cam" role="button" tabindex="0" data-cam="${c.id}" aria-label="Ingrandisci la webcam ${c.name}">
+    <img alt="Webcam in diretta ${c.name}" loading="lazy">
+    <div class="err" hidden>Immagine non disponibile</div>
+    <span class="badge live">Live</span>
+    ${c.stream ? '<span class="badge video">▶ Video</span>' : '<span class="badge hd">HD</span>'}
+    <div class="cap"><div><b>${c.name}</b><small>${c.sub}</small></div><em>${c.stream ? "foto o video" : "foto"}</em></div>
+  </div>`;
+}
+
+function reloadCams() {
+  const t = Date.now();
+  document.querySelectorAll(".cam[data-cam]").forEach(el => {
+    el.querySelector(".err").hidden = true;
+    const img = el.querySelector("img");
+    img.hidden = false;
+    img.src = CAM_BASE + el.dataset.cam + "&t=" + t;
+  });
+  const at = new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+  $("camTime").textContent = "immagine delle " + at;
+  $("camTime2").textContent = "Immagini delle " + at;
+}
+document.addEventListener("error", e => {
+  const card = e.target.closest?.(".cam[data-cam]");
+  if (card && e.target.tagName === "IMG") { e.target.hidden = true; card.querySelector(".err").hidden = false; }
+}, true);
+
+const lb = $("lb");
+let lbCam = null;
+function openCam(id, video) {
+  lbCam = CAMS.find(c => c.id === id);
+  if (!lbCam) return;
+  $("lbTitle").textContent = lbCam.name;
+  $("lbSub").textContent = lbCam.sub;
+  $("lbVideo").hidden = !lbCam.stream;
+  showCam(video && lbCam.stream ? "video" : "foto");
+  lb.showModal();
+}
+function showCam(mode) {
+  $("lbFoto").setAttribute("aria-pressed", mode === "foto");
+  $("lbVideo").setAttribute("aria-pressed", mode === "video");
+  $("lbBody").innerHTML = mode === "video"
+    ? `<iframe src="${STREAM_BASE + lbCam.stream}" title="Video in diretta ${lbCam.name}" allow="autoplay; fullscreen" allowfullscreen></iframe>`
+    : `<img src="${CAM_BASE + lbCam.id}&t=${Date.now()}" alt="Webcam in diretta ${lbCam.name}">`;
+}
+$("lbFoto").addEventListener("click", () => showCam("foto"));
+$("lbVideo").addEventListener("click", () => showCam("video"));
+$("lbClose").addEventListener("click", () => lb.close());
+lb.addEventListener("click", e => { if (e.target === lb) lb.close(); });
+lb.addEventListener("close", () => { $("lbBody").innerHTML = ""; });      // ferma il video
+document.addEventListener("click", e => {
+  const card = e.target.closest(".cam[data-cam]");
+  if (card) openCam(card.dataset.cam, !!e.target.closest(".badge.video"));
+});
+document.addEventListener("keydown", e => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.(".cam[data-cam]")) { e.preventDefault(); openCam(e.target.dataset.cam, false); }
+});
+
+$("cams").innerHTML = CAMS.filter(c => c.id !== "passocolla").map(camCard).join("");
+$("camReload").addEventListener("click", reloadCams);
+$("reload").addEventListener("click", load);
+
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>
