@@ -144,14 +144,15 @@ dialog.lb::backdrop { background: rgba(0,0,0,.85); }
   <div id="camMain"></div>
   <div class="strip" id="cams"></div>
 
-  <div class="label">Prossimi giorni · fascia 9–19</div>
+  <div class="label">Prossimi giorni · dalle 9 al tramonto</div>
   <div class="glass days num" id="days"></div>
 
   <footer class="foot">
     <button class="btn" type="button" id="reload">Aggiorna</button><br>
     <span id="updated">—</span><br>
-    Previsioni sulla quota del passo, aggiornate ogni 15 minuti. Il giudizio guarda pioggia, temporali, neve,
-    ghiaccio sotto i 3 °C, raffiche oltre 40/60 km/h e nebbia: la webcam resta il riscontro migliore.<br>
+    Previsioni sulla quota del passo, aggiornate ogni 15 minuti. Il giudizio cerca la finestra più lunga dalle 9 al tramonto
+    senza pioggia, temporali, neve, ghiaccio (notte sotto zero o freddo con strada bagnata), raffiche oltre 40/60 km/h,
+    nebbia e strada ancora bagnata dalle 12 ore prima: la webcam resta il riscontro migliore.<br>
     Dati <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0) ·
     webcam <a href="https://www.meteo-pedemontanaforlivese.it/#webcam" target="_blank" rel="noopener">Meteo Pedemontana Forlivese</a>
   </footer>
@@ -219,7 +220,24 @@ const ICONS = {
 const svg = (code, isDay) => `<svg viewBox="0 0 64 64" aria-hidden="true">${ICONS[kind(code, isDay)]}</svg>`;
 const SKY = { sun: "clear", moon: "clear", partly: "partly", partlyNight: "partly", cloud: "cloud", fog: "fog", rain: "rain", snow: "snow", storm: "storm" };
 
-/* ---------- Valutazione per la moto ---------- */
+/* ---------- Valutazione per la moto ----------
+   Ogni ora è verde/gialla/rossa; il giudizio guarda la finestra pulita più lunga tra le 9 e il tramonto. */
+
+// arricchisce le ore con pioggia delle 12 h precedenti e ghiaccio rimasto dalla notte
+function enrich(rows) {
+  rows.forEach((r, i) => { r.rain12 = rows.slice(Math.max(0, i - 12), i).reduce((s, x) => s + x.precip, 0); });
+  for (const date of new Set(rows.map(r => r.date))) {
+    const night = rows.filter(r => (r.date === date && r.hour <= 8) || (r.date < date && r.time >= prevDay(date) + "T18"));
+    if (!night.length) continue;
+    const cold = Math.min(...night.map(r => r.temp)) <= 1;
+    const wet = night.reduce((s, r) => s + r.precip, 0) >= 0.3 || night.some(r => r.rh >= 95);
+    if (!cold || !wet) continue;
+    for (const r of rows.filter(x => x.date === date && x.hour > 8)) { if (r.temp >= 4) break; r.iceCarry = true; }
+  }
+  return rows;
+}
+function prevDay(date) { const d = new Date(date + "T12:00"); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
+
 function assessHour(h) {
   const r = [];
   if (h.code >= 95) r.push(["Temporali", 2]);
@@ -227,21 +245,31 @@ function assessHour(h) {
   if ([56, 57, 66, 67].includes(h.code)) r.push(["Pioggia gelata", 2]);
   if (h.precip >= 0.5 || h.prob >= 60) r.push(["Pioggia", 2]);
   else if (h.prob >= 30 || h.precip > 0.1) r.push(["Possibili piogge", 1]);
-  if (h.temp <= 3) r.push(["Rischio ghiaccio", 2]);
-  else if (h.temp < 8) r.push(["Freddo", 1]);
+  if (h.iceCarry || (h.temp <= 2 && (h.rain12 >= 0.3 || h.rh >= 95))) r.push(["Ghiaccio in ombra", 2]);
+  else if (h.temp <= 1) r.push(["Gelo", 1]);
+  if (h.feels <= -2) r.push(["Freddo intenso", 1]);
   if (h.gust >= 60) r.push(["Raffiche forti", 2]);
   else if (h.gust >= 40) r.push(["Vento a raffiche", 1]);
   if (h.vis != null) {
     if (h.vis < 300) r.push(["Nebbia fitta", 2]);
     else if (h.vis < 1000) r.push(["Nebbia", 1]);
   }
+  if (h.rain12 >= 1 && h.precip < 0.5) r.push(["Strada bagnata", 1]);
   return { level: r.reduce((m, x) => Math.max(m, x[1]), 0), reasons: r };
 }
 
-function assessWindow(hours, wetBefore) {
+// serie più lunga di ore consecutive con livello <= max
+function longestRun(res, max) {
+  let best = null, cur = null;
+  for (const x of res) {
+    cur = x.level <= max ? (cur ? { ...cur, to: x.h.hour, len: cur.len + 1 } : { from: x.h.hour, to: x.h.hour, len: 1 }) : null;
+    if (cur && (!best || cur.len > best.len)) best = { ...cur };
+  }
+  return best || { len: 0 };
+}
+
+function assessWindow(hours) {
   const res = hours.map(h => ({ h, ...assessHour(h) }));
-  const bad = res.filter(x => x.level === 2).length;
-  const warn = res.filter(x => x.level === 1).length;
   const byReason = new Map();
   for (const x of res) for (const [name, lvl] of x.reasons) {
     const e = byReason.get(name) || { name, lvl, from: x.h.hour, to: x.h.hour };
@@ -249,28 +277,25 @@ function assessWindow(hours, wetBefore) {
     byReason.set(name, e);
   }
   const reasons = [...byReason.values()].sort((a, b) => b.lvl - a.lvl);
-  if (wetBefore >= 1) reasons.push({ name: "Strada bagnata", lvl: 1, note: `${fmt1(wetBefore)} mm prima` });
-  // finestra migliore: serie più lunga di ore senza problemi
-  let best = null, cur = null;
-  for (const x of res) {
-    cur = x.level === 0 ? (cur ? { ...cur, to: x.h.hour } : { from: x.h.hour, to: x.h.hour }) : null;
-    if (cur && (!best || cur.to - cur.from > best.to - best.from)) best = { ...cur };
-  }
-  const level = bad >= 2 ? 2 : (bad === 1 || warn >= 3 || (wetBefore >= 1 && warn >= 1)) ? 1 : 0;
-  return { level, reasons, best };
+  const feelsMin = hours.length ? Math.min(...hours.map(h => h.feels)) : null;
+  const g = longestRun(res, 0), y = longestRun(res, 1);
+  const all = g.len === res.length;
+  if (g.len >= 4) return { level: 0, title: "Si va in moto", short: "Si va", reasons, feelsMin,
+    when: all ? "Condizioni buone su tutta la fascia" : `Finestra buona ${range(g.from, g.to)}` };
+  if (g.len >= 2) return { level: 1, title: `Giretto corto, ${range(g.from, g.to)}`, short: "Corto", reasons, feelsMin,
+    when: `Solo ${g.len} ore pulite di fila` };
+  if (y.len >= 3) return { level: 1, title: "Sì, ma con prudenza", short: "Prudenza", reasons, feelsMin,
+    when: `Finestra migliore ${range(y.from, y.to)}` };
+  return { level: 2, title: "Meglio restare a casa", short: "Casa", reasons, feelsMin, when: "Nessuna finestra decente nella fascia" };
 }
-const LEVEL = [
-  { css: "var(--go)",   title: "Si va in moto",          short: "Si va" },
-  { css: "var(--warn)", title: "Sì, ma con prudenza",    short: "Prudenza" },
-  { css: "var(--stop)", title: "Meglio restare a casa",  short: "Casa" }
-];
+const LEVEL_CSS = ["var(--go)", "var(--warn)", "var(--stop)"];
+// fine fascia: le 19 o il tramonto (se il sole cala dopo la mezza, conta anche quell'ora)
+const rideEnd = sunset => Math.min(RIDE_TO, +sunset.slice(11, 13) + (+sunset.slice(14, 16) >= 30 ? 1 : 0));
 
 /* ---------- Utilità ---------- */
-const fmt1 = n => n.toLocaleString("it-IT", { maximumFractionDigits: 1 });
 const rnd = n => Math.round(n);
 const hh = h => String(h).padStart(2, "0");
-const range = (a, b) => a === b ? `${hh(a)}:00` : `${hh(a)}–${hh(b + 1)}`;
-const wetBefore = (rows, first) => { const i = rows.indexOf(first); return i < 0 ? 0 : rows.slice(Math.max(0, i - 6), i).reduce((s, r) => s + r.precip, 0); };
+const range = (a, b) => `${hh(a)}–${hh(b + 1)}`;
 
 /* ---------- Dati ---------- */
 async function getJSON(url) {
@@ -282,18 +307,19 @@ const api = p => "https://api.open-meteo.com/v1/forecast?" + new URLSearchParams
 const passURL = () => api({
   latitude: PASS.lat, longitude: PASS.lon, elevation: PASS.elev, timezone: "Europe/Rome", forecast_days: 4, past_days: 1,
   current: "temperature_2m,apparent_temperature,weather_code,wind_gusts_10m,is_day,visibility",
-  hourly: "temperature_2m,precipitation_probability,precipitation,weather_code,wind_gusts_10m,visibility,is_day",
+  hourly: "temperature_2m,apparent_temperature,relative_humidity_2m,precipitation_probability,precipitation,weather_code,wind_gusts_10m,visibility,is_day",
   daily: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunset"
 });
 const faenzaURL = () => api({ latitude: FAENZA.lat, longitude: FAENZA.lon, timezone: "Europe/Rome", current: "temperature_2m,weather_code" });
 
 function hourlyRows(d) {
   const H = d.hourly;
-  return H.time.map((t, i) => ({
+  return enrich(H.time.map((t, i) => ({
     time: t, date: t.slice(0, 10), hour: +t.slice(11, 13),
-    temp: H.temperature_2m[i], prob: H.precipitation_probability[i] ?? 0, precip: H.precipitation[i] ?? 0,
+    temp: H.temperature_2m[i], feels: H.apparent_temperature[i] ?? H.temperature_2m[i], rh: H.relative_humidity_2m[i] ?? 0,
+    prob: H.precipitation_probability[i] ?? 0, precip: H.precipitation[i] ?? 0,
     code: H.weather_code[i], gust: H.wind_gusts_10m[i] ?? 0, vis: H.visibility ? H.visibility[i] : null, isDay: H.is_day[i]
-  }));
+  })));
 }
 
 /* ---------- Render ---------- */
@@ -317,29 +343,27 @@ function render(d, fz) {
   // fattori rapidi
   $("dFeels").textContent = rnd(c.apparent_temperature) + "°";
   $("dGust").textContent = rnd(c.wind_gusts_10m) + " km/h";
-  const rain6 = rows.slice(Math.max(0, nowIdx - 6), nowIdx).reduce((s, r) => s + r.precip, 0);
-  $("dRoad").textContent = rain6 >= 1 ? "Bagnata" : rain6 > 0 ? "Umida" : "Asciutta";
+  const cur = rows[nowIdx];
+  $("dRoad").textContent = cur.rain12 >= 1 ? "Bagnata" : (cur.rain12 > 0.2 || cur.rh >= 95) ? "Umida" : "Asciutta";
   $("dSun").textContent = D.sunset[dIdx].slice(11, 16);
 
-  // giudizio: oggi se resta tempo nella fascia e c'è ancora luce, altrimenti domani
-  let date = today, from = Math.max(RIDE_FROM, nowHour), label = "Oggi";
-  if (nowHour >= RIDE_TO || nowHour >= +D.sunset[dIdx].slice(11, 13) + 1) { date = D.time[dIdx + 1]; from = RIDE_FROM; label = "Domani"; }
-  const win = rows.filter(r => r.date === date && r.hour >= from && r.hour < RIDE_TO);
-  const a = assessWindow(win, wetBefore(rows, win[0]));
-  const L = LEVEL[a.level];
-  $("verdict").style.setProperty("--lvl", L.css);
-  $("vTitle").textContent = label === "Domani" ? "Domani " + L.title[0].toLowerCase() + L.title.slice(1) : L.title;
-  $("vWin").textContent = `${label} ${hh(from)}–${RIDE_TO}`;
-  $("vWhen").textContent = a.best
-    ? (a.level === 0 ? "Condizioni buone su tutta la fascia" : `Finestra migliore ${range(a.best.from, a.best.to)}`)
-    : "Nessuna finestra pulita nella fascia";
-  $("vChips").innerHTML = a.reasons.length
-    ? a.reasons.map(r => `<span class="chip" style="--c:${r.lvl === 2 ? "var(--stop)" : "var(--warn)"}">${r.name} · ${r.note ?? range(r.from, r.to)}</span>`).join("")
-    : `<span class="chip" style="--c:var(--go)">Asciutto, poco vento, temperature ok</span>`;
+  // giudizio: oggi se restano almeno 2 ore di luce nella fascia, altrimenti domani
+  let date = today, from = Math.max(RIDE_FROM, nowHour), end = rideEnd(D.sunset[dIdx]), label = "Oggi";
+  if (end - from < 2) { date = D.time[dIdx + 1]; from = RIDE_FROM; end = rideEnd(D.sunset[dIdx + 1]); label = "Domani"; }
+  const win = rows.filter(r => r.date === date && r.hour >= from && r.hour < end);
+  const a = assessWindow(win);
+  $("verdict").style.setProperty("--lvl", LEVEL_CSS[a.level]);
+  $("vTitle").textContent = label === "Domani" ? "Domani " + a.title[0].toLowerCase() + a.title.slice(1) : a.title;
+  $("vWin").textContent = `${label} ${hh(from)}–${hh(end)}`;
+  $("vWhen").textContent = a.when;
+  const chips = a.reasons.map(r => `<span class="chip" style="--c:${LEVEL_CSS[r.lvl]}">${r.name} · ${range(r.from, r.to)}</span>`);
+  if (!a.reasons.length) chips.push(`<span class="chip" style="--c:var(--go)">Asciutto, poco vento, niente ghiaccio</span>`);
+  if (a.feelsMin != null && a.feelsMin < 8) chips.push(`<span class="chip" style="--c:#fff">Percepita fino a ${rnd(a.feelsMin)}° · ${a.feelsMin < 3 ? "sottotuta termico" : "vestiti pesante"}</span>`);
+  $("vChips").innerHTML = chips.join("");
 
   // ore della fascia giudicata
   $("hLabel").textContent = `${label}, ore in moto`;
-  $("hours").innerHTML = win.map(r => `<div class="hour${r.time === rows[nowIdx].time ? " now" : ""}" style="--lvl:${LEVEL[assessHour(r).level].css}" title="${WMO[r.code] ?? ""} · raffiche ${rnd(r.gust)} km/h">
+  $("hours").innerHTML = win.map(r => `<div class="hour${r.time === cur.time ? " now" : ""}" style="--lvl:${LEVEL_CSS[assessHour(r).level]}" title="${WMO[r.code] ?? ""} · raffiche ${rnd(r.gust)} km/h">
       <div class="h">${hh(r.hour)}</div>${svg(r.code, r.isDay)}
       <div class="t">${rnd(r.temp)}°</div><div class="p">${r.prob >= 10 ? r.prob + "%" : ""}</div><div class="bar"></div>
     </div>`).join("");
@@ -347,12 +371,12 @@ function render(d, fz) {
   // prossimi giorni
   $("days").innerHTML = D.time.map((t, i) => {
     if (t < today) return "";
-    const dr = rows.filter(r => r.date === t && r.hour >= RIDE_FROM && r.hour < RIDE_TO);
-    const lv = assessWindow(dr, wetBefore(rows, dr[0])).level;
+    const dr = rows.filter(r => r.date === t && r.hour >= RIDE_FROM && r.hour < rideEnd(D.sunset[i]));
+    const da = assessWindow(dr);
     const name = t === today ? "Oggi" : new Date(t + "T12:00").toLocaleDateString("it-IT", { weekday: "short", day: "numeric" });
-    return `<div class="day" style="--lvl:${LEVEL[lv].css}">
+    return `<div class="day" style="--lvl:${LEVEL_CSS[da.level]}">
       <span class="n">${name}</span>${svg(D.weather_code[i], 1)}
-      <span class="tag"><i></i>${LEVEL[lv].short}</span>
+      <span class="tag"><i></i>${da.short}</span>
       <span class="pp">${(D.precipitation_probability_max[i] ?? 0) >= 10 ? D.precipitation_probability_max[i] + "%" : ""}</span>
       <span class="mm">${rnd(D.temperature_2m_max[i])}°<span>${rnd(D.temperature_2m_min[i])}°</span></span>
     </div>`;
